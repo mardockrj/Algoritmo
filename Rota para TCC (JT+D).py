@@ -1,12 +1,13 @@
-"""Vehicles Routing Problem (VRP) with Time Windows."""
-
+"""Problema de roteamento de veículo com janela de tempo"""
+#importação das bibliotecas OR tools
 from __future__ import print_function
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
 
 def create_data_model():
-    """Stores the data for the problem."""
+    """Armazenagem dos dados do problema: matriz de tempo, janela de tempo de cada locação, rotas inicialmente propostas, transbordos solicitados,
+    número de embarcações envolvidas e atribui o depósito como o local 0"""
     data = {'time_matrix': [
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 319, 314, 314, 297, 297, 276, 96, 168, 357, 308, 146, 146, 189, 152, 152],
@@ -67,11 +68,12 @@ def create_data_model():
 
     return data
 
-
+# função responsável por imprimir o resultado na tela.
 def print_solution(data, manager, routing, solution):
     """Prints solution on console."""
     time_dimension = routing.GetDimensionOrDie('Time')
     total_time1 = 0
+    # Para cada embarcação é montado o roteiro e calculado o tempo acumulado de navegação
     for vehicle_id in range(data['num_vehicles']):
         index = routing.Start(vehicle_id)
         plan_output = 'Rota da Embarcação {}:\n'.format(vehicle_id + 1)
@@ -85,92 +87,96 @@ def print_solution(data, manager, routing, solution):
         plan_output += '{0} Tempo({1},{2})\n'.format(manager.IndexToNode(index),
                                                      solution.Min(time_var),
                                                      solution.Max(time_var))
+        # Apresenta o tempo total acumulado da rota desenhada para cada embarcação
         plan_output += 'Tempo da rota: {} min\n'.format(
             solution.Min(time_var))
         print(plan_output)
+        # Apresenta o tempo acumulado de todas as embarcações somados
         total_time1 += solution.Min(time_var)
     print('Total de minutos para todas as embarcações: {} min'.format(total_time1))
 
 
 def main():
-    """Solve the VRP with time windows."""
-    # Instantiate the data problem.
+    """Resolvedor do VRP com janela de tempo"""
+    # Instancia os dados do problema
     data = create_data_model()
 
-    # Create the routing index manager.
+    # Cria o gerenciador de índice de roteamento.
     manager = pywrapcp.RoutingIndexManager(len(data['time_matrix']),
                                            data['num_vehicles'], data['depot'])
 
-    # Create Routing Model.
+    # Cria o modelo de roteamento.
     routing = pywrapcp.RoutingModel(manager)
 
-    # Create and register a transit callback.
+    # Cria e registra uma chamada de transito.
 
     def time_callback(from_index, to_index):
-        """Returns the travel time between the two nodes."""
-        # Convert from routing variable Index to time matrix NodeIndex.
+        """Retorna o tempo de viagem entre dois nós"""
+        # Converte do índice da variável de roteamento em índice da matriz de tempo
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
         return data['time_matrix'][from_node][to_node]
 
     transit_callback_index = routing.RegisterTransitCallback(time_callback)
 
-    # Define cost of each arc.
+    # Define o custo de cada arco.
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
-    # Add Time Windows constraint.
+    # Adiciona a restrição de janela de tempo.
     time = 'Time'
     routing.AddDimension(
         transit_callback_index,
-        120,  # allow waiting time
-        5000,  # maximum time per vehicle
-        False,  # Don't force start cumul to zero.
+        120,  # permite tempo de espera na locação
+        5000,  # Máximo tempo de viagem por veículo
+        False,  # Não força o início cumulativo a zero.
         time)
     time_dimension = routing.GetDimensionOrDie(time)
 
-    # Add time window constraints for each location except depot.
+    # Adiciona a restrição de janela de tempo para cada locação, exceto o depósito que não existe nesse caso.
     for location_idx, time_window in enumerate(data['time_windows']):
         if location_idx == 0:
             continue
         index = manager.NodeToIndex(location_idx)
         time_dimension.CumulVar(index).SetRange(time_window[0], time_window[1])
 
-    # Add time window constraints for each vehicle start node.
+    # Adiciona restrição de janela de tempo para cada nó inicial do veículo
     for vehicle_id in range(data['num_vehicles']):
         index = routing.Start(vehicle_id)
         time_dimension.CumulVar(index).SetRange(data['time_windows'][0][0],
                                                 data['time_windows'][0][1])
 
-    # Instantiate route start and end times to produce feasible times.
+    # Instancia os horários de início e término da rota para produzir horários factíveis.
     for i in range(data['num_vehicles']):
         routing.AddVariableMinimizedByFinalizer(
             time_dimension.CumulVar(routing.Start(i)))
         routing.AddVariableMinimizedByFinalizer(
             time_dimension.CumulVar(routing.End(i)))
 
-    # Define Transportation Requests.
+    # Define solicitações de transporte.
     for request in data['pickups_deliveries']:
         pickup_index = manager.NodeToIndex(request[0])
         delivery_index = manager.NodeToIndex(request[1])
         routing.AddPickupAndDelivery(pickup_index, delivery_index)
+     # Define que o veículo de coleta e entrega sejam os mesmos para ambas operações.
         routing.solver().Add(
             routing.VehicleVar(pickup_index) == routing.VehicleVar(
                 delivery_index))
+     # Define que a passagem pelo nó de entrega deve ter tempo acumulado maior que o nó de coleta.
         routing.solver().Add(
             time_dimension.CumulVar(pickup_index) <=
             time_dimension.CumulVar(delivery_index))
 
-    # Setting first solution heuristic.
+    # Configura a heurística selecionada e a metaheurística como automática.
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.local_search_metaheuristic = (
         routing_enums_pb2.LocalSearchMetaheuristic.AUTOMATIC)
     # search_parameters.time_limit.seconds = 30
     # search_parameters.log_search = True
 
-    # Solve the problem.
+    # Resolve o problema.
     solution = routing.SolveWithParameters(search_parameters)
 
-    # Print solution on console.
+    # Imprime a solução no console.
     initial_solution = routing.ReadAssignmentFromRoutes(data['initial_routes'], True)
     print('\n =================== Solução inicial por sugestão ================= \n')
     print_solution(data, manager, routing, initial_solution)
