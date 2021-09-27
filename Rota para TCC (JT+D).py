@@ -70,7 +70,7 @@ def create_data_model():
 
 # função responsável por imprimir o resultado na tela.
 def print_solution(data, manager, routing, solution):
-    """Prints solution on console."""
+    """Imprime a solução na tela."""
     time_dimension = routing.GetDimensionOrDie('Time')
     total_time1 = 0
     # Para cada embarcação é montado o roteiro e calculado o tempo acumulado de navegação
